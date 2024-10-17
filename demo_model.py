@@ -1,6 +1,11 @@
+# Download
+import spacy.cli
+spacy.cli.download("en_core_web_trf")
+
 # coding: utf-8
 import os
 os.environ['TOKENIZERS_PARALLELISM'] = 'False'
+
 import warnings
 import gc
 import time
@@ -19,8 +24,9 @@ import langdetect
 langdetect.DetectorFactory.seed = 0
 from utils import get_ents_en, get_ents_zh, add_pinyin, get_labelled_text
 
-import openai
-openai.api_key = "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"
+import cohere
+# import openai
+# openai.api_key = "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"
 
 # specify tasks
 # tasks = ['abs', 'poli', 'trans']
@@ -123,18 +129,36 @@ def hide_text(raw_input, target_ents, model, tokenizer, lang, ltp, spacy_model):
     gc.collect()
     return response
 
+# def get_api_output(hidden_text, task_type, lang):
+#     with open(f'./prompts/v5/api_{task_type}_{lang}.txt', 'r', encoding='utf-8') as f:
+#         template = f.read()
+#     response = openai.ChatCompletion.create(
+#             #   model="gpt-4",
+#               model="gpt-3.5-turbo",
+#               temperature=0.1,
+#               messages=[
+#                     {"role": "user", "content": template % hidden_text}
+#                 ]
+#             )
+#     return response['choices'][0]['message']['content'].strip(" \n")
+from google.colab import userdata
+co = cohere.Client(userdata.get('COHERE_TOKEN'))  # Replace 'YOUR_API_KEY' with your actual API key
+
 def get_api_output(hidden_text, task_type, lang):
+    # Read the template from file
     with open(f'./prompts/v5/api_{task_type}_{lang}.txt', 'r', encoding='utf-8') as f:
         template = f.read()
-    response = openai.ChatCompletion.create(
-            #   model="gpt-4",
-              model="gpt-3.5-turbo",
-              temperature=0.1,
-              messages=[
-                    {"role": "user", "content": template % hidden_text}
-                ]
-            )
-    return response['choices'][0]['message']['content'].strip(" \n")
+
+    # Generate the output using Cohere
+    response = co.generate(
+        model='command-xlarge-nightly',  # You can adjust the model as per your needs
+        prompt=template % hidden_text,
+        temperature=0.1,  # Similar to OpenAI's temperature setting
+        max_tokens=300  # Adjust max tokens based on the expected response length
+    )
+    
+    # Return the generated response, stripping whitespace and newlines
+    return response.generations[0].text.strip(" \n")
 
 def recover_text(sub_content, sub_output, content, model, tokenizer, task_type, lang):
     re_model = PeftModel.from_pretrained(model, seek_model_path % task_type, quantization_config=bnb_config, device_map='cuda:0', trust_remote_code=True)
@@ -168,7 +192,8 @@ def recover_text(sub_content, sub_output, content, model, tokenizer, task_type, 
 if __name__ == '__main__':
     # load models
     print('loading model...')
-    model = AutoModelForCausalLM.from_pretrained(base_model_dir, load_in_4bit=True, quantization_config=bnb_config, device_map='cuda:0', trust_remote_code=True, torch_dtype=torch.float16)
+    base_model_dir = "bigscience/bloomz-1b7" 
+    model = AutoModelForCausalLM.from_pretrained(base_model_dir,  quantization_config=bnb_config, device_map='cuda:0', trust_remote_code=True, torch_dtype=torch.float16) #load_in_4bit=True, 
     tokenizer = AutoTokenizer.from_pretrained(base_model_dir, trust_remote_code=True)
     smart_tokenizer_and_embedding_resize(tokenizer=tokenizer,model=model)
     spacy_model = spacy.load(f'{lang}_core_web_trf')
